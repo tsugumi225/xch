@@ -1,21 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net;
-using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using AngleSharp;
 
 namespace _2channel
 {
-    public class ThreadInfomation
+    public class Thre
     {
-        public long threadKey { get; set; }
-        public string threadTitle { get; set; }
+        private Board board;
+        public long key { get; set; }
+        public string title { get; set; }
         public int resCount { get; set; }
-        public int depth { get; set; }
         public DateTime FirstWriteTime { get; set; }
         public DateTime LastWriteTime { get; set; }
         public TimeSpan lifeTime { get; set; }
@@ -24,14 +20,18 @@ namespace _2channel
         private List<Res> resList = new List<Res>();
         public List<Res> newArrivalRes = new List<Res>();
 
-        public ThreadInfomation(int depth , string line)
+        /// <summary>
+        /// 初期化処理 lineにはsubject.txtから読み取った一行を入れること
+        /// </summary>
+        /// <param name="board"></param>
+        /// <param name="line">ex. 1507478543.dat<>VIPでスプラトゥーン 	 (55)</param>
+        public Thre(Board board, string line)
         {
-
-            this.depth = depth;
-            Regex re = new Regex(@"(?<threadKey>\d{10})\.dat\<\>(?<title>.*)\t*.*\((?<resCount>\d{1,4})\)$");
+            this.board = board;
+            Regex re = new Regex(@"(?<key>\d{10})\.dat\<\>(?<title>.*)\t*.*\((?<resCount>\d{1,4})\)$");
             Match match = re.Match(line);
-            this.threadKey = long.Parse(match.Groups["threadKey"].Value);
-            this.threadTitle = match.Groups["title"].Value;
+            this.key = long.Parse(match.Groups["key"].Value);
+            this.title = match.Groups["title"].Value;
             this.resCount = int.Parse(match.Groups["resCount"].Value);
         }
 
@@ -41,19 +41,18 @@ namespace _2channel
         /// </summary>
         /// <param name="dtnow"></param>
         /// <param name="before"></param>
-        internal void update(DateTime dtnow, ThreadInfomation before)
+        internal void update(DateTime dtnow, Thre before)
         {
             //レスが増えてた
-            if(this.resCount > before.resCount)
+            if (this.resCount > before.resCount)
             {
-                //最終書き込み時間を更新する
-                this.LastWriteTime = dtnow;
+                this.LastWriteTime = dtnow; //最終書き込み時間を更新する
             }
             else
             {
-                //最終書き込み時間を引きつぐ
-                this.LastWriteTime = before.LastWriteTime;
+                this.LastWriteTime = before.LastWriteTime;  //最終書き込み時間を引きつぐ
             }
+
             //立った時刻を引き継ぐ
             this.FirstWriteTime = before.FirstWriteTime;
             //最終書き込みからの経過時間算出
@@ -75,37 +74,8 @@ namespace _2channel
             string downloadString = "";
             using (WebClient wc = new WebClient())
             {
-                downloadString = wc.DownloadString("http://hebi.2ch.net/test/read.cgi/news4vip/" + threadKey + "/");
+                downloadString = wc.DownloadString(new Uri(board.readCgi, key + "/"));
             }
-            //using (StringReader sr = new StringReader(downloadString))
-            //{
-            //int cnt = 0;
-            //while (true)
-            //{
-            //    string line = sr.ReadLine();
-            //    //最終行を過ぎたらbreak
-            //    if (line == null) break;
-
-            //    //4文字以下は確実に違う
-            //    if (line.Length <= 4) continue;
-            //    //dtを含まないものは違う
-            //    if (line.Contains("<dt>") == false) continue;
-
-            //    if (line.Contains("<dt>") == true && line.Contains("<div ") == true)
-            //    {
-            //        //>>2とかの広告表示対策
-            //        Regex reg = new Regex(@"<div id.*<\/div>");
-            //        line = reg.Replace(line, "");
-            //    }
-            //    cnt++;
-            //    if (cnt > resList.Count)
-            //    {
-            //        newArrival.Add(new Res(line));
-            //    }
-            //}
-            //resList.AddRange(newArrival);
-            //this.newArrivalRes = newArrival;
-            //}
 
             var parser = new AngleSharp.Parser.Html.HtmlParser();
             var document = parser.Parse(downloadString);
