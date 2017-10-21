@@ -1,56 +1,66 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 
 namespace _2channel
 {
     public class ThreadList
     {
+        private Board board;
         private string subject;
-        private Dictionary<long, ThreadInfomation> preDict = new Dictionary<long, ThreadInfomation>();
-        private Dictionary<long, ThreadInfomation> nowDict = new Dictionary<long, ThreadInfomation>();
-        private List<ThreadInfomation> deletedThreadsList = new List<ThreadInfomation>();
+        private Dictionary<long, Thre> preDict = new Dictionary<long, Thre>();
+        private Dictionary<long, Thre> nowDict = new Dictionary<long, Thre>();
+        private List<Thre> deletedThreadsList = new List<Thre>();
 
-        public ThreadList()
+        /// <summary>
+        /// 板のURLで初期化すること
+        /// </summary>
+        /// <param name="boardUrl">ex. https://hebi.5ch.net/news4vip/ </param>
+        public ThreadList(Board board)
         {
             this.subject = "";
+            this.board = board;
+        }
+
+        public void update()
+        {
+            if(getSubject_txt())
+            {
+                createThreadList();
+            }
         }
 
         #region getSubject.txt
         /// <summary>
         /// subject.textを元にしてスレ一覧の情報を求める
-        /// 例外終了で白紙のsubject.textを保存
+        /// 例外終了で白紙のsubject.textを保持
         /// </summary>
         /// <returns>正常終了/例外終了</returns>
-        public bool getSubject_txt()
+        private bool getSubject_txt()
         {
-            System.Net.WebClient wc = new System.Net.WebClient();
-
-            bool ret = false;
+            var wc = new System.Net.WebClient();
 
             try /*正常に読み込めたらファイルにそれを書き込む　*/
             {
-                this.subject = wc.DownloadString("http://hebi.2ch.net/news4vip/subject.txt");
-                ret = true;
+                this.subject = wc.DownloadString(board.subjectTxt);
             }
-            catch (Exception)　/*　読込エラーがでたらなにもしない　*/
+            catch (Exception)
             {
+                //読込エラーがでたら白紙で保持する
+                this.subject = "";
                 return false;
             }
-            finally　/*閉じる*/
+            finally
             {
                 wc.Dispose();
             }
+            //正常なファイルが読み込めるまで読み込みを繰り返す
             if (isValidFile() == false)
             {
                 getSubject_txt();
             }
-            createThreadList();
-            return ret;
+            return true;
         }
         #endregion
 
@@ -62,7 +72,7 @@ namespace _2channel
         private bool isValidFile()
         {
             string line = "";
-            using (System.IO.StringReader sr = new System.IO.StringReader(this.subject))
+            using (var sr = new StringReader(this.subject))
             {
                 //最後の行を読みこむ
                 while (sr.Peek() != -1)
@@ -70,71 +80,74 @@ namespace _2channel
                     line = sr.ReadLine();
                 }
             }
-            if (line.Length >= 6) /* 6なことに意味はあまりない　バグ回避*/
-            {
-                //末尾6文字を抜き出して数字が1～4桁含まれていれば正常なファイルと判断する
-                line = line.Substring(line.Length - 6);
-                Regex regex = new Regex(@"\(\d{1,4}?\)");
 
-                return regex.IsMatch(line);
-            }
-            else
-            {
+            int ERROR_LENGTH = 5;
+            //1行が5文字以下の場合、正常なファイルでない可能性が高いし以下の処理でエラーが出る
+            //総レス数を示す(1000)の部分のあれ
+            if (line.Length < ERROR_LENGTH)
                 return false;
-            }
+
+            //末尾5文字を抜き出して数字が1～4桁含まれていれば正常なファイルと判断する
+            line = line.Substring(line.Length - ERROR_LENGTH);
+            Regex regex = new Regex(@"\(\d{1,4}?\)");
+            return regex.IsMatch(line);
         }
         #endregion
 
         private void createThreadList()
         {
-            //一番最初
-            if(preDict == null)
-            {
-                using (System.IO.StringReader sr = new System.IO.StringReader(this.subject))
-                {
-                    int cnt = 0;
-                    while (sr.Peek() != -1)
-                    {
-                        cnt++;
-                        string line = sr.ReadLine();
-                        ThreadInfomation ti = new ThreadInfomation(cnt, line);
-                        preDict.Add(ti.threadKey, ti);
-                    }
-                }
-                //念のためコピー
-                nowDict = preDict;
-                return;
-            }
+            nowDict = null; //初期化
+            nowDict = new Dictionary<long, Thre>();
 
-            //二回目以降以下
-            nowDict = null;
-            nowDict = new Dictionary<long, ThreadInfomation>();
-            DateTime dtnow = DateTime.Now;
-
-            using (System.IO.StringReader sr = new System.IO.StringReader(this.subject))
+            bool isFirst = (this.preDict == null);   //この処理を行うのは初めてかどうか
+            using (var sr = new StringReader(this.subject))
             {
-                int cnt = 0;
-                while (sr.Peek() != -1)
+                for(int depth = 1; sr.Peek() != -1; depth++)
                 {
-                    cnt++;
                     string line = sr.ReadLine();
-                    ThreadInfomation ti = new ThreadInfomation(cnt, line);
-                    nowDict.Add(ti.threadKey, ti);
+                    Thre thre = new Thre(this.board, line);
+                    if (isFirst)
+                        this.preDict.Add(thre.key, thre);
+                    else
+                        this.nowDict.Add(thre.key, thre);
                 }
             }
+            //初めての処理なら以前との比較ができないのでここでreturn
+            if (isFirst)
+                return;
 
-            //落ちたスレを求める
+            //落ちたスレのリストを更新
+            searchDeletedThread();
+
+            //現在生存しているスレについて情報の更新
+            updateThreadInfomation();
+
+            preDict.Clear();
+            preDict = nowDict;
+        }
+
+        /// <summary>
+        /// 前回取得したスレ一覧と今回取得したスレ一覧を比較し、落ちたスレを求める
+        /// </summary>
+        private void searchDeletedThread()
+        {
             this.deletedThreadsList.Clear();
-            foreach (KeyValuePair<long, ThreadInfomation> pre in preDict)
+            foreach (KeyValuePair<long, Thre> pre in preDict)
             {
                 if (nowDict.ContainsKey(pre.Key) == false)
                 {
                     deletedThreadsList.Add(pre.Value);
                 }
             }
+        }
 
-            //現在生存しているスレについて
-            foreach (KeyValuePair<long, ThreadInfomation> now in nowDict)
+        /// <summary>
+        /// 前回取得したスレ一覧と今回取得したスレ一覧を比較し、総レス数などの更新を行う
+        /// </summary>
+        private void updateThreadInfomation()
+        {
+            DateTime dtnow = DateTime.Now;
+            foreach (KeyValuePair<long, Thre> now in nowDict)
             {
                 //以前からあったスレの場合
                 if (preDict.ContainsKey(now.Key))
@@ -148,101 +161,68 @@ namespace _2channel
                     now.Value.LastWriteTime = dtnow;
                 }
             }
-            preDict.Clear();
-            preDict = nowDict;
         }
 
-
         /// <summary>
-        /// 引数で指定した語句を含むスレのListを返す
+        /// 引数で指定した語句を含む/含まないスレのListを返す
         /// </summary>
         /// <param name="match">～を含む</param>
+        /// <param name="unmatch">～を含まない</param>
         /// <returns></returns>
-        public List<ThreadInfomation> searchThreadOnMatch(string match)
+        public List<Thre> findByWord(List<string> match, List<string> unmatch = null)
         {
-            getSubject_txt();
+            this.update();
 
-            List<ThreadInfomation> ret = new List<ThreadInfomation>();
+            List<Thre> ret = new List<Thre>();
 
-            foreach(KeyValuePair<long, ThreadInfomation> now in nowDict)
+            //スレタイに引数を含むスレのリストを取得
+            foreach(Thre thre in nowDict.Values)
             {
-                //大文字小文字の違いを無視　一致すれば0以上の整数を返す
-                if (now.Value.threadTitle.IndexOf(match,StringComparison.OrdinalIgnoreCase) != -1)
+                bool isAllMatch = true;
+                foreach (string word in match)
                 {
-                    ret.Add(now.Value);
+                    //大文字小文字の違いを無視　一致すれば0以上の整数を返す
+                    if (thre.title.IndexOf(word, StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        isAllMatch = false;
+                        break;
+                    }
                 }
+                // 引数のワードを全て含んだスレのみを返却する
+                if(isAllMatch)
+                    ret.Add(thre);
             }
-            return ret;
-        }
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="match">一致する語句</param>
-        /// <param name="list">探すスレのリスト</param>
-        /// <returns></returns>
-        public List<ThreadInfomation> searchThreadOnMatch(string match, List<ThreadInfomation> list)
-        {
-            List<ThreadInfomation> ret = new List<ThreadInfomation>();
+            //不一致ワードの指定がないならここでreturn
+            if (unmatch == null)
+                return ret;
 
-            foreach (ThreadInfomation ti in list)
+            //上記リストから不一致ワードを含むリストを作成
+            var unnecessary = new List<Thre>();
+            foreach(Thre thre in ret)
             {
-                //大文字小文字の違いを無視　一致すれば0以上の整数を返す
-                if (ti.threadTitle.IndexOf(match, StringComparison.OrdinalIgnoreCase) != -1)
+                foreach(string word in unmatch)
                 {
-                    ret.Add(ti);
+                    // 不一致語句をどれか一つでも含むと除外とする
+                    if (thre.title.IndexOf(word, StringComparison.OrdinalIgnoreCase) > 0)
+                        unnecessary.Add(thre);
                 }
+                
             }
-            return ret;
-        }
-
-        /// <summary>
-        /// 引数で指定した語句を含まないスレのListを返す
-        /// </summary>
-        /// <param name="match">～を含む</param>
-        /// <param name="misMatch">～を含まない</param>
-        /// <returns></returns>
-        public List<ThreadInfomation> searchThreadOnMismatch(string misMatch)
-        {
-            List<ThreadInfomation> ret = new List<ThreadInfomation>();
-
-            foreach (KeyValuePair<long, ThreadInfomation> now in nowDict)
+            //不一致ワードを含むものをリストから削除
+            foreach(Thre thre in unnecessary)
             {
-                //大文字小文字の違いを無視　一致すれば0以上の整数を返す
-                if (now.Value.threadTitle.IndexOf(misMatch, StringComparison.OrdinalIgnoreCase) == -1)
-                {
-                    ret.Add(now.Value);
-                }
-            }
-            return ret;
-        }
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="misMatch">一致しない語句</param>
-        /// <param name="list">探すスレのリスト</param>
-        /// <returns></returns>
-        public List<ThreadInfomation> searchThreadOnMismatch(string misMatch, List<ThreadInfomation> list)
-        {
-            List<ThreadInfomation> ret = new List<ThreadInfomation>();
-
-            foreach (ThreadInfomation ti in list)
-            {
-                //大文字小文字の違いを無視　一致すれば0以上の整数を返す
-                if (ti.threadTitle.IndexOf(misMatch, StringComparison.OrdinalIgnoreCase) == -1)
-                {
-                    ret.Add(ti);
-                }
+                ret.Remove(thre);
             }
             return ret;
         }
 
-        public List<ThreadInfomation> searchThread(int threadKey)
+        public List<Thre> findByKey(int threadKey)
         {
-            getSubject_txt();
+            this.update();
 
-            List<ThreadInfomation> ret = new List<ThreadInfomation>();
+            List<Thre> ret = new List<Thre>();
 
-            foreach (KeyValuePair<long, ThreadInfomation> now in nowDict)
+            foreach (KeyValuePair<long, Thre> now in nowDict)
             {
                 if (now.Key == threadKey)
                 {

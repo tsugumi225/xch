@@ -4,9 +4,11 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using MyUtil;
 
 namespace _2channel
 {
+    [Serializable]
     public class Res
     {
         //public string rowData { get; set; }
@@ -14,7 +16,7 @@ namespace _2channel
         public int resNumber { get; set; }
         public string name { get; set; }
         public string mail { get; set; }
-        public string  writeTime { get; set; }
+        public string writeTime { get; set; }
         public string id { get; set; }
         public string body { get; set; }
 
@@ -23,7 +25,7 @@ namespace _2channel
         {
             this.resNumber = int.Parse(element.GetElementsByClassName("number")[0].TextContent);
             this.name = element.GetElementsByClassName("name")[0].TextContent;
-            //ブラウザから見るとメール欄の情報ガナイ
+            //ブラウザから見るとメール欄の情報がない
             //this.mail = element.GetElementsByClassName("mail")[0].TextContent;
             this.mail = "";
             this.writeTime = element.GetElementsByClassName("date")[0].TextContent;
@@ -36,6 +38,11 @@ namespace _2channel
         {
             DateTime dt = DateTime.ParseExact(this.writeTime,"yyyy/MM/dd(ddd) HH:mm:ss.fff", null);
             return dt;
+        }
+
+        public Res getCopy()
+        {
+            return DeepCopy.Copy<Res>(this);
         }
     }
 }
